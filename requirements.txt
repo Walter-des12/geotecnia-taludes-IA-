@@ -6,4 +6,4 @@ scikit-learn==1.3.2
 lightgbm==4.1.0
 shap==0.42.1
 plotly==5.18.0
-pyslope @ https://github.com/jessebonanno/pyslope/archive/refs/heads/master.zip
+git+https://github.com/jessebonanno/pyslope.git#egg=pyslope
