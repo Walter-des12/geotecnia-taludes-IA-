@@ -1,58 +1,78 @@
-from pyslope import Slope, Material, Udl, LineLoad
+import numpy as np
 
-def calcular_fs_pyslope(
-    H, beta, peso, cohesion, phi, ru,
-    udl_magnitude=None,
-    ll_magnitude=None
-):
-    """
-    Wrapper simple para ejecutar un análisis de pySlope.
-    Devuelve:
-        - FS crítico
-        - figura crítica
-    """
+def peso_especifico_medio(γ):
+    return γ
 
-    # 1. Crear la pendiente
-    s = Slope(height=H, angle=beta, length=None)
+def fs_fellenius(xc, yc, R, Hslice, γ, c, phi_deg, ru=0.0, n_slices=30):
+    phi = np.radians(phi_deg)
+    Δx = (2*R) / n_slices
 
-    # 2. Crear material único (puedes luego agregar estratos)
-    m1 = Material(
-        unit_weight=peso,
-        friction_angle=phi,
-        cohesion=cohesion,
-        depth_to_bottom=H  # capa completa
-    )
-    s.set_materials(m1)
+    sum_resisting = 0.0
+    sum_driving = 0.0
 
-    # 3. Definir agua (ru)
-    # pySlope usa profundidad desde la CRESTA
-    if ru > 0:
-        # profundidad equivalente según ru
-        water_depth = H * (1 - ru)
-        s.set_water_table(water_depth)
+    for i in range(n_slices):
+        x = xc - R + Δx/2 + i*Δx
+        y = yc + np.sqrt(max(R**2 - (x-xc)**2, 0))
 
-    # 4. Cargas opcionales
-    if udl_magnitude:
-        s.set_udls(Udl(magnitude=udl_magnitude))
+        area_slice = Hslice * Δx
+        W = γ * area_slice
 
-    if ll_magnitude:
-        s.set_lls(LineLoad(magnitude=ll_magnitude))
+        alpha = np.arctan2((x - xc), np.sqrt(max(R**2 - (x-xc)**2, 0)))
 
-    # 5. Límites de análisis automáticos
-    left = s.get_top_coordinates()[0] - H
-    right = s.get_bottom_coordinates()[0] + H
-    s.set_analysis_limits(left, right)
+        N = W * np.cos(alpha)
+        U = ru * N
+        N_eff = N - U
 
-    # 6. Opciones de iteración
-    s.update_analysis_options(slices=50, iterations=2000)
+        S_res = c + N_eff * np.tan(phi)
 
-    # 7. Ejecutar análisis
-    s.analyse_slope()
+        sum_resisting += S_res
+        sum_driving += W * np.sin(alpha)
 
-    # 8. Obtener FS crítico
-    fs = s.get_min_FOS()
+    FS = sum_resisting / sum_driving if sum_driving != 0 else np.inf
+    return FS
 
-    # 9. Obtener figura
-    fig = s.plot_critical()
 
-    return fs, fig
+def fs_bishop(xc, yc, R, Hslice, γ, c, phi_deg, ru=0.0, n_slices=30, max_iter=100, tol=1e-5):
+    phi = np.radians(phi_deg)
+    Δx = (2*R) / n_slices
+    FS = 1.0
+
+    for _ in range(max_iter):
+        sum_num = 0.0
+        sum_den = 0.0
+
+        for i in range(n_slices):
+            x = xc - R + Δx/2 + i*Δx
+            alpha = np.arctan2((x-xc), np.sqrt(max(R**2 - (x-xc)**2, 0)))
+            area_slice = Hslice * Δx
+            W = γ * area_slice
+            m = 1 - ru
+
+            num_i = c + m * W * np.tan(phi)
+            num_i *= Δx
+
+            den_i = W * np.sin(alpha) + (num_i * np.tan(phi)) / FS
+
+            sum_num += num_i
+            sum_den += den_i
+
+        FS_new = sum_num / sum_den if sum_den != 0 else np.inf
+        if abs(FS_new - FS) < tol:
+            return FS_new
+
+        FS = FS_new
+
+    return FS
+
+
+def calcular_fs(metodo, xc, yc, R, H, γ, c, phi, ru=0.0, n=30):
+    metodo = metodo.lower()
+
+    if metodo == "fellenius":
+        return fs_fellenius(xc, yc, R, H, γ, c, phi, ru, n)
+
+    elif metodo == "bishop":
+        return fs_bishop(xc, yc, R, H, γ, c, phi, ru, n)
+
+    else:
+        raise ValueError("Método desconocido. Usa 'fellenius' o 'bishop'.")
